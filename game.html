@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>3D Ping Pong with AI - three.js</title>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        background: #111;
+      }
+      #score {
+        position: absolute;
+        top: 10px;
+        left: 50%;
+        transform: translateX(-50%);
+        color: white;
+        font-family: monospace;
+        font-size: 24px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="score">Player: 0 | AI: 0</div>
+
+    <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
+
+    <script>
+      // --- Basic three.js Setup ---
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x0a0a0a);
+
+      const camera = new THREE.PerspectiveCamera(
+        45,
+        window.innerWidth / window.innerHeight,
+        0.1,
+        1000
+      );
+      camera.position.set(0, 15, 25);
+      camera.lookAt(0, 0, 0);
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      document.body.appendChild(renderer.domElement);
+
+      // --- Lighting ---
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+      scene.add(ambientLight);
+
+      const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+      directionalLight.position.set(10, 20, 10);
+      scene.add(directionalLight);
+
+      // --- Table Setup ---
+      const tableWidth = 10;
+      const tableHeight = 0.5;
+      const tableDepth = 25;
+
+      const tableGeometry = new THREE.BoxGeometry(
+        tableWidth,
+        tableHeight,
+        tableDepth
+      );
+      const tableMaterial = new THREE.MeshPhongMaterial({ color: 0x004400 });
+      const table = new THREE.Mesh(tableGeometry, tableMaterial);
+      table.position.y = -tableHeight / 2;
+      scene.add(table);
+
+      // Table Lines (white center line)
+      const centerLineGeometry = new THREE.PlaneGeometry(tableWidth, 0.1);
+      const centerLineMaterial = new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+      });
+      const centerLine = new THREE.Mesh(centerLineGeometry, centerLineMaterial);
+      centerLine.position.y = 0.01; // just above table surface
+      centerLine.rotation.x = -Math.PI / 2;
+      scene.add(centerLine);
+
+      // --- Ball Setup ---
+      const ballRadius = 0.4;
+      const ballGeometry = new THREE.SphereGeometry(ballRadius, 32, 16);
+      const ballMaterial = new THREE.MeshPhongMaterial({ color: 0xffffff });
+      const ball = new THREE.Mesh(ballGeometry, ballMaterial);
+      ball.position.set(0, ballRadius, 0);
+      scene.add(ball);
+
+      // --- Paddles Setup ---
+      const paddleWidth = 3;
+      const paddleHeight = 0.5;
+      const paddleDepth = 1;
+
+      // Player Paddle (Bottom)
+      const playerPaddleGeometry = new THREE.BoxGeometry(
+        paddleWidth,
+        paddleHeight,
+        paddleDepth
+      );
+      const playerPaddleMaterial = new THREE.MeshPhongMaterial({
+        color: 0x2222ff,
+      });
+      const playerPaddle = new THREE.Mesh(
+        playerPaddleGeometry,
+        playerPaddleMaterial
+      );
+      playerPaddle.position.set(0, paddleHeight / 2, tableDepth / 2 - 1);
+      scene.add(playerPaddle);
+
+      // AI Paddle (Top)
+      const aiPaddleGeometry = new THREE.BoxGeometry(
+        paddleWidth,
+        paddleHeight,
+        paddleDepth
+      );
+      const aiPaddleMaterial = new THREE.MeshPhongMaterial({ color: 0xff2222 });
+      const aiPaddle = new THREE.Mesh(aiPaddleGeometry, aiPaddleMaterial);
+      aiPaddle.position.set(0, paddleHeight / 2, -tableDepth / 2 + 1);
+      scene.add(aiPaddle);
+
+      // --- Variables for game state ---
+      let ballVelocity = new THREE.Vector3(0.15, 0, 0.2); // x,z velocity (no y needed for simple bounce)
+      let playerScore = 0;
+      let aiScore = 0;
+
+      // Movement limits
+      const paddleLimitX = tableWidth / 2 - paddleWidth / 2;
+      const paddleLimitZ = tableDepth / 2 - paddleDepth / 2;
+
+      // UI Score element
+      const scoreDisplay = document.getElementById("score");
+
+      // --- Player Controls ---
+      // We'll control player paddle along the X axis only using mouse movement.
+
+      const raycaster = new THREE.Raycaster();
+      const mouse = new THREE.Vector2();
+      const planeY = 0.25; // height of paddle center (paddleHeight/2)
+      const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -planeY);
+      window.addEventListener("mousemove", (event) => {
+        // Convert mouse to normalized device coords (-1 to 1)
+        mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+        mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+        raycaster.setFromCamera(mouse, camera);
+
+        // Calculate intersection point of mouse ray and horizontal plane at paddle height
+        const intersectPoint = new THREE.Vector3();
+        raycaster.ray.intersectPlane(plane, intersectPoint);
+
+        // Clamp paddle X within limits
+        if (intersectPoint) {
+          playerPaddle.position.x = THREE.MathUtils.clamp(
+            intersectPoint.x,
+            -paddleLimitX,
+            paddleLimitX
+          );
+        }
+      });
+
+      // --- Game Logic Functions ---
+      function resetBall(scoredBy) {
+        ball.position.set(0, ballRadius, 0);
+        // Ball moves towards who lost the point
+        ballVelocity.set(
+          (Math.random() * 0.2 + 0.1) * (scoredBy === "player" ? -1 : 1),
+          0,
+          (Math.random() * 0.2 + 0.1) * (scoredBy === "player" ? 1 : -1)
+        );
+      }
+
+      function updateScore() {
+        scoreDisplay.textContent = `Player: ${playerScore} | AI: ${aiScore}`;
+      }
+
+      // --- AI Logic ---
+      // AI paddle tries to follow the ball's X position with some max speed
+      function aiMove() {
+        const speed = 0.12;
+        if (ball.position.z < 0) {
+          // ball on AI side
+          if (aiPaddle.position.x < ball.position.x - 0.1) {
+            aiPaddle.position.x += speed;
+          } else if (aiPaddle.position.x > ball.position.x + 0.1) {
+            aiPaddle.position.x -= speed;
+          }
+        } else {
+          // Return to center slowly when ball on player side
+          if (aiPaddle.position.x > 0.05) aiPaddle.position.x -= speed / 2;
+          else if (aiPaddle.position.x < -0.05)
+            aiPaddle.position.x += speed / 2;
+        }
+        // Clamp AI paddle movement
+        aiPaddle.position.x = THREE.MathUtils.clamp(
+          aiPaddle.position.x,
+          -paddleLimitX,
+          paddleLimitX
+        );
+      }
+
+      // --- Collision Detection ---
+      function checkCollisionPaddle(paddle) {
+        // Check if ball is near paddle in Z axis
+        const distZ = Math.abs(ball.position.z - paddle.position.z);
+        if (distZ <= paddleDepth / 2 + ballRadius) {
+          // Check X overlap
+          if (
+            ball.position.x >=
+              paddle.position.x - paddleWidth / 2 - ballRadius &&
+            ball.position.x <= paddle.position.x + paddleWidth / 2 + ballRadius
+          ) {
+            // Reflect ball on Z axis and add some velocity change on X based on hit position
+            ballVelocity.z = -ballVelocity.z;
+
+            // Add some spin/angle change relative to where ball hits paddle
+            const hitPosX = ball.position.x - paddle.position.x;
+            ballVelocity.x += hitPosX * 0.03;
+
+            // Cap ball velocity
+            ballVelocity.x = THREE.MathUtils.clamp(ballVelocity.x, -0.5, 0.5);
+            ballVelocity.z = THREE.MathUtils.clamp(ballVelocity.z, -0.7, 0.7);
+
+            // Move ball out of paddle to prevent sticking
+            if (paddle.position.z > 0)
+              ball.position.z =
+                paddle.position.z - paddleDepth / 2 - ballRadius;
+            else
+              ball.position.z =
+                paddle.position.z + paddleDepth / 2 + ballRadius;
+          }
+        }
+      }
+
+      // --- Ball Movement and Boundaries ---
+      function updateBall() {
+        ball.position.add(ballVelocity);
+
+        // Bounce ball off left/right edges of table
+        if (ball.position.x <= -tableWidth / 2 + ballRadius) {
+          ball.position.x = -tableWidth / 2 + ballRadius;
+          ballVelocity.x = -ballVelocity.x;
+        } else if (ball.position.x >= tableWidth / 2 - ballRadius) {
+          ball.position.x = tableWidth / 2 - ballRadius;
+          ballVelocity.x = -ballVelocity.x;
+        }
+
+        // Bounce ball off top/bottom edges (short sides of table)
+        // But if ball passes paddles (goal), score
+        if (ball.position.z <= -tableDepth / 2 - ballRadius) {
+          // Player scores
+          playerScore++;
+          updateScore();
+          resetBall("ai");
+        } else if (ball.position.z >= tableDepth / 2 + ballRadius) {
+          // AI scores
+          aiScore++;
+          updateScore();
+          resetBall("player");
+        }
+
+        // Bounce ball on table surface (y-axis), simulate gravity + bounce
+        // Simplified: just keep ball y fixed for simplicity (no vertical bounce)
+      }
+
+      // --- Main Animation Loop ---
+      function animate() {
+        requestAnimationFrame(animate);
+
+        aiMove();
+        updateBall();
+        checkCollisionPaddle(playerPaddle);
+        checkCollisionPaddle(aiPaddle);
+
+        renderer.render(scene, camera);
+      }
+
+      // --- Initialize ---
+      updateScore();
+      resetBall(null);
+      animate();
+
+      // --- Responsive Resize ---
+      window.addEventListener("resize", () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+    </script>
+  </body>
+</html>
