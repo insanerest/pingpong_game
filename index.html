@@ -3,8 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>3D Ping Pong with AI - three.js</title>
-    <style>
+    <title>3D Ping Pong Game</title>
+      <style>
       body {
         margin: 0;
         overflow: hidden;
@@ -262,13 +262,47 @@
       }
 
       // --- Main Animation Loop ---
-      function animate() {
+      let lastTime = 0;
+
+      function animate(time = 0) {
         requestAnimationFrame(animate);
 
+        // time is in milliseconds, convert to seconds
+        const deltaTime = (time - lastTime) / 1000;
+        lastTime = time;
+
+        // Update ball position based on deltaTime
+        ball.position.x += ballVelocity.x * deltaTime * 60; // multiplied by 60 to keep similar speed as before
+        ball.position.z += ballVelocity.z * deltaTime * 60;
+
         aiMove();
-        updateBall();
         checkCollisionPaddle(playerPaddle);
         checkCollisionPaddle(aiPaddle);
+
+        // Bounce logic and score checks need to adapt to position changes accordingly
+        // (You might want to refactor updateBall() logic to fit here or inline the bounce code)
+
+        // Clamp ball position and handle bounce/reflection as before
+
+        // Example bounce left/right
+        if (ball.position.x <= -tableWidth / 2 + ballRadius) {
+          ball.position.x = -tableWidth / 2 + ballRadius;
+          ballVelocity.x = -ballVelocity.x;
+        } else if (ball.position.x >= tableWidth / 2 - ballRadius) {
+          ball.position.x = tableWidth / 2 - ballRadius;
+          ballVelocity.x = -ballVelocity.x;
+        }
+
+        // Check scoring bounds similarly
+        if (ball.position.z <= -tableDepth / 2 - ballRadius) {
+          playerScore++;
+          updateScore();
+          resetBall("ai");
+        } else if (ball.position.z >= tableDepth / 2 + ballRadius) {
+          aiScore++;
+          updateScore();
+          resetBall("player");
+        }
 
         renderer.render(scene, camera);
       }
@@ -287,3 +321,4 @@
     </script>
   </body>
 </html>
+
